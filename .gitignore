@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# C / build outputs
+*.o
+*.obj
+*.exe
+*.out
+build/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# LaTeX build files
+*.aux
+*.log
+*.synctex.gz
+*.fdb_latexmk
+*.fls
