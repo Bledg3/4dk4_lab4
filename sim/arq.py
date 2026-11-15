@@ -24,15 +24,23 @@ Model (see the report for the full list of assumptions):
     With Wr = 1, sel never adds information beyond cum, so the ACK is
     purely cumulative, which is GBN behaviour.
   * Each outstanding packet has its own retransmission timer, started when
-    its transmission finishes. On a timeout only that packet is queued for
-    retransmission. With Wr = 1 every packet sent after a lost one is
-    discarded by the receiver, so all of them time out in turn and are
-    resent back-to-back: the go-back-N behaviour comes out on its own.
+    its transmission finishes. On a timeout:
+        SR  (Wr > 1): only that packet is queued for retransmission.
+        GBN (Wr = 1): every outstanding packet base..next_seq-1 is queued
+                      (go back N). Resending only the timed-out packet is not
+                      enough for GBN: a new packet can then be sent between
+                      two retransmissions, reach the in-order receiver first
+                      and be discarded, which repeats indefinitely once it
+                      starts (a single spurious timeout from a lost ACK
+                      triggers it).
   * There are no NAKs; retransmissions are triggered by timeouts only.
   * Retransmissions have priority over new packets, lowest seq first.
   * Events that happen at the same instant are processed in this order:
-    ACK arrival, data arrival, end of transmission, timeout. So an ACK
-    that arrives exactly at the timeout instant cancels the timeout.
+    ACK arrival, data arrival, timeout, end of transmission. So an ACK
+    that arrives exactly at the timeout instant cancels the timeout, and a
+    packet whose timer expires exactly when the link frees up is queued
+    before the sender picks the next packet (otherwise a new packet would
+    jump ahead of the retransmission, which breaks go-back-N ordering).
 """
 
 import heapq
@@ -43,8 +51,8 @@ from sim import config
 # Event types; the number is the tie-break priority at equal times
 ACK_ARRIVE = 0
 DATA_ARRIVE = 1
-TX_END = 2
-TIMEOUT = 3
+TIMEOUT = 2
+TX_END = 3
 
 EVENT_NAMES = {ACK_ARRIVE: "ACK_ARRIVE", DATA_ARRIVE: "DATA_ARRIVE",
                TX_END: "TX_END", TIMEOUT: "TIMEOUT"}
@@ -231,9 +239,20 @@ def simulate(Ws, Wr, pd=0.0, pa=0.0, t_out=config.T_OUT,
             seq, att = data
             if seq >= base and seq not in acked and attempt.get(seq) == att \
                     and seq not in in_retx:
-                heapq.heappush(retx_queue, seq)
-                in_retx.add(seq)
-                log(t, f"TIMEOUT   seq={seq} -> queued for retransmission")
+                if Wr == 1:
+                    # Go-back-N: resend every outstanding packet from base.
+                    # Queuing them all (retransmissions have priority) stops
+                    # a new packet overtaking a retransmission, which the
+                    # in-order receiver would discard.
+                    go_back = [s for s in range(base, next_seq) if s not in in_retx]
+                    for s in go_back:
+                        heapq.heappush(retx_queue, s)
+                        in_retx.add(s)
+                    log(t, f"TIMEOUT   seq={seq} -> go back, queue {base}..{next_seq - 1}")
+                else:
+                    heapq.heappush(retx_queue, seq)
+                    in_retx.add(seq)
+                    log(t, f"TIMEOUT   seq={seq} -> queued for retransmission")
                 try_send(t)
 
     # ---------------- results ----------------
